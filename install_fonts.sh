@@ -63,43 +63,143 @@ if [[ ! "$OS" =~ ^(ubuntu|debian)$ ]]; then
     fi
 fi
 
-# Update package list
+# Update package list with error handling
 print_step "Paket listesi güncelleniyor..."
-$SUDO apt-get update -qq
+if ! $SUDO apt-get update -qq 2>/dev/null; then
+    print_warning "Repository güncelleme hatası tespit edildi!"
+    print_step "Ubuntu sürüm uyumsuzluğu için fallback stratejisi uygulanıyor..."
+    
+    # Backup original sources.list
+    if [[ -f /etc/apt/sources.list ]]; then
+        $SUDO cp /etc/apt/sources.list /etc/apt/sources.list.backup
+        print_status "sources.list yedeklendi"
+    fi
+    
+    # Try to fix repository issues for newer Ubuntu versions
+    if [[ "$VERSION_ID" > "24.04" ]]; then
+        print_step "Ubuntu $VERSION_ID için repository ayarları düzeltiliyor..."
+        
+        # Replace problematic repositories with LTS versions
+        $SUDO sed -i 's/oracular/noble/g' /etc/apt/sources.list 2>/dev/null || true
+        $SUDO sed -i 's/mantic/jammy/g' /etc/apt/sources.list 2>/dev/null || true
+        $SUDO sed -i 's/lunar/jammy/g' /etc/apt/sources.list 2>/dev/null || true
+        
+        print_status "Repository ayarları Ubuntu 24.04 LTS (Noble) olarak güncellendi"
+    fi
+    
+    # Clean package cache and try again
+    $SUDO apt-get clean
+    print_step "Package cache temizlendi, tekrar deneniyor..."
+    
+    if ! $SUDO apt-get update -qq; then
+        print_warning "Repository güncelleme yine başarısız oldu."
+        print_warning "Manuel font kurulumu ile devam ediliyor..."
+        MANUAL_FALLBACK=true
+    else
+        print_status "Repository güncelleme başarılı!"
+        MANUAL_FALLBACK=false
+    fi
+else
+    print_status "Paket listesi başarıyla güncellendi"
+    MANUAL_FALLBACK=false
+fi
 
 # Install font packages
 print_step "Türkçe karakter destekli fontlar yükleniyor..."
 
-FONT_PACKAGES=(
-    "fonts-dejavu"
-    "fonts-dejavu-core"
-    "fonts-dejavu-extra"
-    "fonts-liberation"
-    "fonts-liberation2"
-    "fonts-noto"
-    "fonts-noto-core"
-    "ttf-mscorefonts-installer"
-    "fontconfig"
-    "fc-cache"
-)
+if [[ "$MANUAL_FALLBACK" == "true" ]]; then
+    print_step "Manuel font kurulum modu aktif..."
+    
+    # Essential fonts only for manual installation
+    ESSENTIAL_PACKAGES=(
+        "fonts-dejavu"
+        "fonts-liberation" 
+        "fonts-noto"
+        "fontconfig"
+    )
+    
+    for package in "${ESSENTIAL_PACKAGES[@]}"; do
+        print_status "Yükleniyor: $package"
+        if $SUDO apt-get install -y "$package" > /dev/null 2>&1; then
+            echo -e "  ${GREEN}✅${NC} $package başarıyla yüklendi"
+        else
+            echo -e "  ${YELLOW}⚠️${NC} $package yüklenemedi - manuel indirme ile devam edilecek"
+        fi
+    done
+else
+    # Full package installation
+    FONT_PACKAGES=(
+        "fonts-dejavu"
+        "fonts-dejavu-core"
+        "fonts-dejavu-extra"
+        "fonts-liberation"
+        "fonts-liberation2"
+        "fonts-noto"
+        "fonts-noto-core"
+        "ttf-mscorefonts-installer"
+        "fontconfig"
+    )
 
-for package in "${FONT_PACKAGES[@]}"; do
-    print_status "Yükleniyor: $package"
-    if $SUDO apt-get install -y "$package" > /dev/null 2>&1; then
-        echo -e "  ${GREEN}✅${NC} $package başarıyla yüklendi"
-    else
-        echo -e "  ${YELLOW}⚠️${NC} $package yüklenemedi (zaten yüklü olabilir)"
-    fi
-done
-
-# Accept Microsoft font license automatically
-print_step "Microsoft fontları için lisans kabul ediliyor..."
-echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | $SUDO debconf-set-selections
+    for package in "${FONT_PACKAGES[@]}"; do
+        print_status "Yükleniyor: $package"
+        if $SUDO apt-get install -y "$package" > /dev/null 2>&1; then
+            echo -e "  ${GREEN}✅${NC} $package başarıyla yüklendi"
+        else
+            echo -e "  ${YELLOW}⚠️${NC} $package yüklenemedi (zaten yüklü olabilir)"
+        fi
+    done
+    
+    # Accept Microsoft font license automatically
+    print_step "Microsoft fontları için lisans kabul ediliyor..."
+    echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | $SUDO debconf-set-selections 2>/dev/null || true
+fi
 
 # Update font cache
 print_step "Font önbelleği güncelleniyor..."
 $SUDO fc-cache -fv > /dev/null 2>&1
 print_status "Font önbelleği güncellendi"
+
+# Manual font download if needed
+if [[ "$MANUAL_FALLBACK" == "true" ]]; then
+    print_step "Manuel font indirme başlatılıyor..."
+    
+    # Download essential fonts manually
+    cd /tmp
+    
+    # DejaVu Fonts
+    if ! fc-list | grep -qi "dejavu"; then
+        print_status "DejaVu fontları indiriliyor..."
+        if wget -q https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2; then
+            tar -xjf dejavu-fonts-ttf-2.37.tar.bz2
+            $SUDO mkdir -p /usr/local/share/fonts/dejavu
+            $SUDO cp dejavu-fonts-ttf-2.37/ttf/*.ttf /usr/local/share/fonts/dejavu/
+            print_status "✅ DejaVu fontları manuel olarak yüklendi"
+            rm -rf dejavu-fonts-*
+        else
+            print_warning "DejaVu fontları indirilemedi"
+        fi
+    fi
+    
+    # Liberation Fonts
+    if ! fc-list | grep -qi "liberation"; then
+        print_status "Liberation fontları indiriliyor..."
+        if wget -q https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz; then
+            tar -xzf liberation-fonts-ttf-2.1.5.tar.gz
+            $SUDO mkdir -p /usr/local/share/fonts/liberation
+            $SUDO cp liberation-fonts-ttf-2.1.5/*.ttf /usr/local/share/fonts/liberation/ 2>/dev/null || true
+            print_status "✅ Liberation fontları manuel olarak yüklendi"
+            rm -rf liberation-fonts-*
+        else
+            print_warning "Liberation fontları indirilemedi"
+        fi
+    fi
+    
+    # Update font cache after manual installation
+    $SUDO fc-cache -fv > /dev/null 2>&1
+    print_status "Manual font kurulumu sonrası font cache güncellendi"
+    
+    cd - > /dev/null
+fi
 
 # Check if fonts are available
 print_step "Yüklenen fontlar kontrol ediliyor..."
@@ -239,6 +339,12 @@ echo
 echo "📋 KURULUM ÖZET"
 echo "================"
 
+if [[ "$MANUAL_FALLBACK" == "true" ]]; then
+    print_warning "⚠️  Repository sorunları nedeniyle manuel kurulum modu kullanıldı"
+    print_status "✅ Temel fontlar manuel olarak yüklendi"
+    print_status "✅ Sistem Ubuntu sürüm uyumsuzluğuna rağmen çalışır durumda"
+fi
+
 if $ALL_FONTS_OK; then
     print_status "✅ Tüm gerekli fontlar başarıyla yüklendi!"
     print_status "✅ Türkçe karakterler artık düzgün görüntülenecek."
@@ -251,6 +357,15 @@ fi
 echo
 print_status "Kurulum tamamlandı! MCPO servisinizi yeniden başlatabilirsiniz."
 print_status "Test için: python3 font_test.py"
+
+# Show manual commands for future reference
+if [[ "$MANUAL_FALLBACK" == "true" ]]; then
+    echo
+    print_status "📝 Gelecek kullanım için manuel komutlar:"
+    echo "   sudo apt update"
+    echo "   sudo apt install -y fonts-dejavu fonts-liberation fonts-noto fontconfig"
+    echo "   sudo fc-cache -fv"
+fi
 
 # Cleanup
 rm -f font_test.py

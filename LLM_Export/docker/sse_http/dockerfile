@@ -9,6 +9,15 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     libxml2-dev \
     libxslt1-dev \
+    fonts-dejavu \
+    fonts-dejavu-core \
+    fonts-dejavu-extra \
+    fonts-liberation \
+    fonts-liberation2 \
+    fonts-noto \
+    fonts-noto-core \
+    fontconfig \
+    && fc-cache -fv \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \

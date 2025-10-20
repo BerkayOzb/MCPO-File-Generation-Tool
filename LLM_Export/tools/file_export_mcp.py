@@ -42,6 +42,9 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import platform
 
 #NonDockerImport
 import asyncio
@@ -304,6 +307,141 @@ log = logging.getLogger("file_export_mcp")
 log.setLevel(_resolve_log_level(LOG_LEVEL_ENV))
 log.info("Effective LOG_LEVEL -> %s", logging.getLevelName(log.level))
 
+# Font management for Turkish character support
+def find_system_fonts():
+    """Find available system fonts that support Unicode/Turkish characters"""
+    system = platform.system()
+    font_paths = []
+    
+    if system == "Windows":
+        font_dirs = [
+            "C:/Windows/Fonts",
+            os.path.expanduser("~/AppData/Local/Microsoft/Windows/Fonts")
+        ]
+    elif system == "Darwin":  # macOS
+        font_dirs = [
+            "/System/Library/Fonts",
+            "/Library/Fonts",
+            os.path.expanduser("~/Library/Fonts")
+        ]
+    else:  # Linux
+        font_dirs = [
+            "/usr/share/fonts",
+            "/usr/local/share/fonts",
+            "/System/Library/Fonts",  # Sometimes available on Linux
+            os.path.expanduser("~/.fonts"),
+            os.path.expanduser("~/.local/share/fonts"),
+            "/usr/share/fonts/truetype",  # Ubuntu/Debian specific
+            "/usr/share/fonts/TTF",       # Some Linux distros
+            "/usr/local/share/fonts/dejavu",  # Our install script location
+        ]
+    
+    # Priority list of fonts that support Turkish characters
+    preferred_fonts = [
+        "DejaVuSans.ttf", "DejaVuSans-Bold.ttf",
+        "LiberationSans-Regular.ttf", "LiberationSans-Bold.ttf", 
+        "NotoSans-Regular.ttf", "NotoSans-Bold.ttf",
+        "arial.ttf", "arialbd.ttf", "Arial.ttf",
+        "calibri.ttf", "calibrib.ttf", "Calibri.ttf",
+        "tahoma.ttf", "tahomabd.ttf", "Tahoma.ttf",
+        "verdana.ttf", "verdanab.ttf", "Verdana.ttf"
+    ]
+    
+    # Recursive search in font directories
+    for font_dir in font_dirs:
+        if os.path.exists(font_dir):
+            log.debug(f"Searching font directory: {font_dir}")
+            try:
+                # Walk through subdirectories
+                for root, dirs, files in os.walk(font_dir):
+                    for font_name in preferred_fonts:
+                        # Case-insensitive search
+                        for file in files:
+                            if file.lower() == font_name.lower():
+                                font_path = os.path.join(root, file)
+                                if os.path.isfile(font_path):
+                                    font_paths.append((font_name, font_path))
+                                    log.debug(f"Found font: {file} at {font_path}")
+                                    break
+                    
+                    # Limit search depth to avoid performance issues
+                    if root.count(os.sep) - font_dir.count(os.sep) >= 3:
+                        dirs.clear()
+                        
+            except (PermissionError, OSError) as e:
+                log.debug(f"Cannot access font directory {font_dir}: {e}")
+                continue
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_fonts = []
+    for font_name, font_path in font_paths:
+        if font_name not in seen:
+            seen.add(font_name)
+            unique_fonts.append((font_name, font_path))
+    
+    log.info(f"Found {len(unique_fonts)} unique Turkish-compatible fonts")
+    return unique_fonts
+
+def register_unicode_fonts():
+    """Register Unicode-capable fonts with ReportLab"""
+    try:
+        available_fonts = find_system_fonts()
+        registered_fonts = {}
+        
+        if not available_fonts:
+            log.warning("No Turkish-compatible fonts found on system")
+            log.warning("Consider running: sudo apt-get install fonts-dejavu fonts-liberation fonts-noto")
+            return {}
+        
+        # Register fonts in priority order
+        for font_name, font_path in available_fonts:
+            try:
+                # Test if font file is readable
+                if not os.access(font_path, os.R_OK):
+                    log.debug(f"Font not readable: {font_path}")
+                    continue
+                
+                # Register font with a clean name
+                clean_name = font_name.replace('.ttf', '').replace('-', '_').replace('.TTF', '')
+                
+                # Check if already registered
+                if clean_name in registered_fonts:
+                    continue
+                
+                # Try to register the font
+                pdfmetrics.registerFont(TTFont(clean_name, font_path))
+                registered_fonts[clean_name] = font_path
+                log.info(f"✅ Registered font: {clean_name} from {os.path.basename(font_path)}")
+                
+                # Register enough fonts for good coverage
+                if len(registered_fonts) >= 6:  # Normal + Bold variants
+                    break
+                    
+            except Exception as e:
+                log.debug(f"Failed to register font {font_name}: {e}")
+                continue
+        
+        if registered_fonts:
+            log.info(f"🎯 Successfully registered {len(registered_fonts)} Unicode fonts")
+            log.info(f"📝 Available fonts: {', '.join(registered_fonts.keys())}")
+            return registered_fonts
+        else:
+            log.error("❌ No Unicode fonts could be registered!")
+            log.error("🔧 To fix this issue:")
+            log.error("   1. Run: sudo apt-get install fonts-dejavu fonts-liberation fonts-noto")
+            log.error("   2. Or run: ./install_fonts.sh")
+            log.error("   3. Restart the application")
+            return {}
+            
+    except Exception as e:
+        log.error(f"Critical error in font registration: {e}")
+        return {}
+
+# Initialize Unicode font support
+UNICODE_FONTS = register_unicode_fonts()
+DEFAULT_UNICODE_FONT = list(UNICODE_FONTS.keys())[0] if UNICODE_FONTS else "Helvetica"
+
 mcp = FastMCP("file_export")
 
 def dynamic_font_size(content_list, max_chars=400, base_size=28, min_size=12):
@@ -340,6 +478,21 @@ def _generate_filename(folder_path: str, ext: str, filename: str = None) -> tupl
     return filepath, filename
 
 styles = getSampleStyleSheet()
+
+# Create Unicode-enabled styles with Turkish character support
+def get_unicode_font_name():
+    """Get the best available Unicode font name"""
+    if UNICODE_FONTS:
+        # Prefer fonts that work well with Turkish characters
+        preferred_order = ['DejaVuSans', 'LiberationSans_Regular', 'NotoSans_Regular', 'arial', 'calibri', 'tahoma', 'verdana']
+        for font in preferred_order:
+            if font in UNICODE_FONTS:
+                return font
+        return list(UNICODE_FONTS.keys())[0]
+    return "Helvetica"
+
+UNICODE_FONT_NAME = get_unicode_font_name()
+
 styles.add(ParagraphStyle(
     name="CustomHeading1",
     parent=styles["Heading1"],
@@ -347,7 +500,8 @@ styles.add(ParagraphStyle(
     fontSize=18,
     spaceAfter=16,
     spaceBefore=12,
-    alignment=TA_LEFT
+    alignment=TA_LEFT,
+    fontName=UNICODE_FONT_NAME
 ))
 styles.add(ParagraphStyle(
     name="CustomHeading2",
@@ -356,7 +510,8 @@ styles.add(ParagraphStyle(
     fontSize=14,
     spaceAfter=12,
     spaceBefore=10,
-    alignment=TA_LEFT
+    alignment=TA_LEFT,
+    fontName=UNICODE_FONT_NAME
 ))
 styles.add(ParagraphStyle(
     name="CustomHeading3",
@@ -365,28 +520,31 @@ styles.add(ParagraphStyle(
     fontSize=12,
     spaceAfter=10,
     spaceBefore=8,
-    alignment=TA_LEFT
+    alignment=TA_LEFT,
+    fontName=UNICODE_FONT_NAME
 ))
 styles.add(ParagraphStyle(
     name="CustomNormal",
     parent=styles["Normal"],
     fontSize=11,
     leading=14,
-    alignment=TA_LEFT
+    alignment=TA_LEFT,
+    fontName=UNICODE_FONT_NAME
 ))
 styles.add(ParagraphStyle(
     name="CustomListItem",
     parent=styles["Normal"],
     fontSize=11,
     leading=14,
-    alignment=TA_LEFT
+    alignment=TA_LEFT,
+    fontName=UNICODE_FONT_NAME
 ))
 styles.add(ParagraphStyle(
     name="CustomCode",
     parent=styles["Code"],
     fontSize=10,
     leading=12,
-    fontName="Courier",
+    fontName=UNICODE_FONT_NAME,  # Use Unicode font instead of Courier for Turkish character support
     backColor=colors.HexColor("#F5F5F5"),
     borderColor=colors.HexColor("#CCCCCC"),
     borderWidth=1,

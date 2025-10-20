@@ -3,6 +3,7 @@
 A lightweight, MCPO-integrated tool that lets you **generate and export real files** (PDF, Excel, PowerPoint, ZIP, etc.) directly from Open WebUI — just like ChatGPT or Claude.
 
 ✅ Supports both **Python** and **Docker**  
+✅ **Full Turkish character support** (ç, ğ, ı, i, ö, ş, ü)  
 ✅ Fully configurable  
 ✅ Ready for production workflows  
 ✅ Open source & MIT licensed
@@ -24,6 +25,11 @@ https://github.com/user-attachments/assets/1e70a977-62f1-498c-895c-7db135ded95b
 
 
 # 🚀 Quick Start
+
+## 🇹🇷 **NEW! Turkish Character Support**
+Full support for Turkish characters (ç, ğ, ı, i, ö, ş, ü) in all document formats (PDF, Word, Excel, PowerPoint).
+
+📖 **Ubuntu/Linux Users**: See [Ubuntu Deployment Guide](UBUNTU_DEPLOYMENT_GUIDE.md) for complete setup instructions.
 
 ## Best practices here: [Best_Practices.md](https://github.com/GlisseManTV/MCPO-File-Generation-Tool/blob/master/Best_Practices.md)
 ## Prompt examples here: [Prompt_Examples.md](https://github.com/GlisseManTV/MCPO-File-Generation-Tool/blob/master/Prompt_Examples.md)
@@ -56,9 +62,26 @@ https://github.com/user-attachments/assets/1e70a977-62f1-498c-895c-7db135ded95b
    - `LOCAL_SD_SCHEDULER`: Scheduler to use (default `Karras`, not mandatory)
    - `LOCAL_SD_SAMPLE`: Sampler to use (default `Euler a`, not mandatory)
    
-3. Install dependencies:
+3. **Install Turkish font support (Ubuntu/Debian):**
    ```bash
-   pip install openpyxl reportlab py7zr fastapi uvicorn python-multipart mcp
+   # Quick font installation
+   sudo apt-get install fonts-dejavu fonts-liberation fonts-noto fontconfig
+   sudo fc-cache -fv
+   
+   # OR use our automated script
+   chmod +x install_fonts.sh
+   sudo ./install_fonts.sh
+   ```
+
+4. Install dependencies:
+   ```bash
+   pip install openpyxl reportlab py7zr fastapi uvicorn python-multipart mcp python-pptx python-docx emoji markdown2 beautifulsoup4
+   ```
+
+5. **Test Turkish character support:**
+   ```bash
+   python3 test_turkish_characters.py
+   # Should show: 🎉 Tüm testler başarılı! Türkçe karakterler düzgün çalışıyor.
    ```
 
 4. Run the file server:
